@@ -2,13 +2,26 @@ import { DiseaseItem, SubmissionRecord } from '../types';
 import { INITIAL_DISEASE_ITEMS } from '../data/defaultCriteria';
 
 const STORAGE_DISEASES_KEY = 'odpc1_jit_criteria_data_v3';
+const LEGACY_STORAGE_DISEASES_KEYS = ['odpc1_jit_criteria_data_v2', 'odpc1_jit_criteria_data'];
 const STORAGE_SUBMISSIONS_KEY = 'odpc1_jit_submissions_history_v2';
 const STORAGE_CURRENT_FEEDBACK_KEY = 'odpc1_jit_current_feedback_v2';
 const STORAGE_CURRENT_RESPONDENT_KEY = 'odpc1_jit_current_respondent_v2';
 
 export const loadDiseaseCriteria = (): DiseaseItem[] => {
   try {
-    const raw = localStorage.getItem(STORAGE_DISEASES_KEY);
+    let raw = localStorage.getItem(STORAGE_DISEASES_KEY);
+    if (!raw) {
+      for (const k of LEGACY_STORAGE_DISEASES_KEYS) {
+        const legacy = localStorage.getItem(k);
+        if (legacy) {
+          raw = legacy;
+          try {
+            localStorage.setItem(STORAGE_DISEASES_KEY, legacy);
+          } catch {}
+          break;
+        }
+      }
+    }
     if (!raw) {
       saveDiseaseCriteria(INITIAL_DISEASE_ITEMS);
       return INITIAL_DISEASE_ITEMS;

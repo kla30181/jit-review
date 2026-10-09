@@ -133,7 +133,7 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
               <span>
-                กำลังเชื่อมต่อกับ <strong>Google Sheets ของผู้ใช้</strong> (รับสำเนาข้อมูลจาก Firestore ผ่าน Apps Script)
+                กำลังเชื่อมต่อกับ <strong>Google Sheets ของผู้ใช้</strong> (พร้อมอัปเดตข้อมูลอัตโนมัติ)
               </span>
             </div>
             <a

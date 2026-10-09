@@ -14,6 +14,9 @@ import {
   ArrowUp,
   ArrowDown,
   ListOrdered,
+  Cloud,
+  UploadCloud,
+  RefreshCw,
 } from 'lucide-react';
 import { DiseaseItem, LevelCriterion, LevelName, CriteriaStatus } from '../types';
 import { DISEASE_GROUPS } from '../data/defaultCriteria';
@@ -23,6 +26,10 @@ interface AdminManagerProps {
   diseases: DiseaseItem[];
   onSaveDiseases: (items: DiseaseItem[]) => void;
   onResetDefault: () => void;
+  cloudSyncStatus?: 'synced' | 'syncing' | 'local';
+  lastCloudSyncTime?: string;
+  onManualSyncToCloud?: () => Promise<void>;
+  onForcePullFromCloud?: () => Promise<void>;
 }
 
 const STANDARD_LEVEL_OPTIONS: LevelName[] = [
@@ -36,6 +43,10 @@ export const AdminManager: React.FC<AdminManagerProps> = ({
   diseases,
   onSaveDiseases,
   onResetDefault,
+  cloudSyncStatus = 'synced',
+  lastCloudSyncTime,
+  onManualSyncToCloud,
+  onForcePullFromCloud,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>('all');
@@ -292,6 +303,70 @@ export const AdminManager: React.FC<AdminManagerProps> = ({
           <span>{toastMessage}</span>
         </div>
       )}
+
+      {/* Cloud Sync Status Banner (Multi-device PC & Notebook sync) */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/90 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm">
+            <Cloud className="w-6 h-6 animate-pulse" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-bold text-[16px] text-blue-950">
+                ระบบซิงค์คลาวด์ข้ามอุปกรณ์ (PC ↔ โน๊ตบุค)
+              </span>
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-bold border ${
+                  cloudSyncStatus === 'synced'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'bg-sky-100 text-sky-800 border-sky-300 animate-pulse'
+                    : 'bg-amber-100 text-amber-800 border-amber-300'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                {cloudSyncStatus === 'synced'
+                  ? 'ซิงค์เรียลไทม์พร้อมใช้งาน'
+                  : cloudSyncStatus === 'syncing'
+                  ? 'กำลังซิงค์...'
+                  : 'บันทึกในเครื่อง'}
+              </span>
+            </div>
+            <p className="text-[13.5px] text-slate-600 mt-1 leading-relaxed">
+              เมื่อเพิ่มหรือแก้ไขรายการโรค ข้อมูลจะถูกบันทึกขึ้นระบบคลาวด์ทันที ทำให้เปิดใช้งานบนคอมพิวเตอร์ โน๊ตบุค หรือแท็บเล็ตเครื่องใด ข้อมูลจะอัปเดตตรงกันทันที
+              {lastCloudSyncTime && (
+                <span className="font-semibold text-slate-700 ml-1">
+                  (อัปเดตล่าสุด: {lastCloudSyncTime})
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {onManualSyncToCloud && (
+            <button
+              onClick={() => onManualSyncToCloud()}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 text-[13.5px] font-bold shadow-2xs transition-all cursor-pointer hover:border-blue-300"
+              title="กดเพื่อบันทึกข้อมูลปัจจุบันขึ้นระบบคลาวด์ทันที"
+            >
+              <UploadCloud className="w-4 h-4 text-blue-600" />
+              <span>บันทึกขึ้นคลาวด์ทันที</span>
+            </button>
+          )}
+
+          {onForcePullFromCloud && (
+            <button
+              onClick={() => onForcePullFromCloud()}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-[13.5px] font-bold shadow-2xs transition-all cursor-pointer hover:border-slate-300"
+              title="กดเพื่อดึงข้อมูลล่าสุดจากระบบคลาวด์"
+            >
+              <RefreshCw className="w-4 h-4 text-slate-500" />
+              <span>ดึงข้อมูลจากคลาวด์</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Top Banner & Control Toolbar */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200/90 shadow-xs">

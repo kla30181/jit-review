@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Settings, BarChart3, BookOpen, FileSpreadsheet, CheckCircle2 } from 'lucide-react';
+import { FileText, Settings, BarChart3, BookOpen, FileSpreadsheet, CheckCircle2, Cloud } from 'lucide-react';
 import { User } from 'firebase/auth';
 
 interface HeaderProps {
@@ -10,6 +10,8 @@ interface HeaderProps {
   onLogin: () => void;
   onLogout: () => void;
   activeSheetUrl?: string | null;
+  cloudSyncStatus?: 'synced' | 'syncing' | 'local';
+  lastCloudSyncTime?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -20,6 +22,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLogin,
   onLogout,
   activeSheetUrl,
+  cloudSyncStatus = 'synced',
+  lastCloudSyncTime,
 }) => {
   return (
     <header className="bg-[#122344] text-white shadow-md border-b border-[#1e3a6d]">
@@ -33,9 +37,30 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 text-[12px] font-medium border border-amber-400/30 mb-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
-              ทีมปฏิบัติการสอบสวนโรค (JIT) สคร.1 เชียงใหม่
+            <div className="flex flex-wrap items-center gap-2 mb-0.5">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 text-[12px] font-medium border border-amber-400/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                ทีมปฏิบัติการสอบสวนโรค (JIT) สคร.1 เชียงใหม่
+              </div>
+              <div
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[12px] font-semibold border ${
+                  cloudSyncStatus === 'synced'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'bg-sky-500/20 text-sky-300 border-sky-400/40 animate-pulse'
+                    : 'bg-amber-500/20 text-amber-300 border-amber-400/40'
+                }`}
+                title="ระบบคลาวด์ซิงค์ข้อมูลอัตโนมัติ ทำให้ข้อมูลระหว่าง PC และโน๊ตบุคตรงกันแบบเรียลไทม์"
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                <span>
+                  {cloudSyncStatus === 'synced'
+                    ? 'คลาวด์ซิงค์เรียลไทม์ (PC ↔ โน๊ตบุค)'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'กำลังเชื่อมต่อคลาวด์...'
+                    : 'บันทึกในเครื่อง'}
+                </span>
+              </div>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
               แบบทบทวนเงื่อนไขการออกสอบสวนโรค
@@ -134,7 +159,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onLogin}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[14px] font-bold bg-white text-slate-700 hover:bg-slate-100 transition-colors shadow-sm border border-slate-200"
-              title="เข้าสู่ระบบ Google เพื่อบันทึกข้อมูลส่วนกลาง"
+              title="เข้าสู่ระบบ Google เพื่อบันทึกคำตอบลง Google Sheets"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
                 <path
@@ -154,7 +179,7 @@ export const Header: React.FC<HeaderProps> = ({
                   d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.73 1.26 6.61l4.01 3.15c.95-2.85 3.6-4.96 6.73-4.96z"
                 />
               </svg>
-              <span>เข้าสู่ระบบ Google</span>
+              <span>ต่อ Google Sheets</span>
             </button>
           )}
         </div>

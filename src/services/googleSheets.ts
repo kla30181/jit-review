@@ -76,7 +76,7 @@ async function postToAppsScript(payload: unknown) {
   body.set('payload', JSON.stringify(payload));
 
   // no-cors ทำให้เว็บ GitHub Pages ส่งข้อมูลไป Apps Script ได้โดยไม่ต้องเปิด Sheets API
-  // response จะเป็น opaque จึงถือว่าส่งสำเร็จเมื่อ fetch ไม่ throw
+  // response จะเป็น opaque จึงตรวจสอบผลการเขียนใน Sheet ไม่ได้
   await fetch(APPS_SCRIPT_URL, {
     method: 'POST',
     mode: 'no-cors',

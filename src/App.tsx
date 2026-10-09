@@ -20,7 +20,7 @@ import {
   FeedbackChoice,
   SubmissionRecord,
 } from './types';
-import { DISEASE_GROUPS } from './data/defaultCriteria';
+import { DISEASE_GROUPS, INITIAL_DISEASE_ITEMS } from './data/defaultCriteria';
 import {
   loadDiseaseCriteria,
   saveDiseaseCriteria,
@@ -33,6 +33,14 @@ import {
   saveDraftRespondent,
 } from './services/storageService';
 import {
+  subscribeToCriteria,
+  saveCriteriaToCloud,
+  fetchCriteriaFromCloud,
+  subscribeToSubmissions,
+  saveSubmissionToCloud,
+  testFirestoreConnection,
+} from './services/firestoreService';
+import {
   initAuth,
   googleSignIn,
   logout,
@@ -42,12 +50,6 @@ import {
   appendResponsesToSheet,
   getSavedSheetId,
 } from './services/googleSheets';
-import {
-  loadDiseaseCriteriaFromFirestore,
-  loadSubmissionsFromFirestore,
-  saveDiseaseCriteriaToFirestore,
-  saveSubmissionToFirestore,
-} from './services/firestoreService';
 import { CheckCircle, AlertCircle, FileSpreadsheet, ExternalLink, ArrowRight } from 'lucide-react';
 
 export default function App() {
@@ -79,14 +81,14 @@ export default function App() {
   // Auth & Google Sheets
   const [user, setUser] = useState<User | null>(null);
   const [activeSheetUrl, setActiveSheetUrl] = useState<string | null>(() => {
-    const configuredUrl = (import.meta.env.VITE_GOOGLE_SHEET_URL || '').trim();
-    if (configuredUrl) return configuredUrl;
     const sheetId = getSavedSheetId();
     return sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : null;
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSyncingSheets, setIsSyncingSheets] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'local'>('syncing');
+  const [lastCloudSyncTime, setLastCloudSyncTime] = useState<string>('');
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -96,29 +98,36 @@ export default function App() {
   // Auth Initialization
   useEffect(() => {
     const unsubscribe = initAuth(
-      async (currentUser) => {
+      (currentUser) => {
         setUser(currentUser);
-        try {
-          const [cloudSubmissions, cloudCriteria] = await Promise.all([
-            loadSubmissionsFromFirestore(),
-            loadDiseaseCriteriaFromFirestore(),
-          ]);
-          if (cloudSubmissions.length > 0) {
-            setSubmissions(cloudSubmissions);
-          }
-          if (cloudCriteria && cloudCriteria.length > 0) {
-            setDiseases(cloudCriteria);
-            saveDiseaseCriteria(cloudCriteria);
-          }
-        } catch (error) {
-          console.error('Firestore load error:', error);
-        }
       },
       () => {
         setUser(null);
       }
     );
     return () => unsubscribe();
+  }, []);
+
+  // Real-time Firestore sync across all devices (PC ↔ Notebook)
+  useEffect(() => {
+    testFirestoreConnection();
+
+    // Subscribe to criteria updates in real time
+    const unsubCriteria = subscribeToCriteria((items, source) => {
+      setDiseases(items);
+      setCloudSyncStatus(source === 'cloud' ? 'synced' : 'local');
+      setLastCloudSyncTime(new Date().toLocaleTimeString('th-TH'));
+    });
+
+    // Subscribe to submissions in real time
+    const unsubSubmissions = subscribeToSubmissions((subs) => {
+      setSubmissions(subs);
+    });
+
+    return () => {
+      unsubCriteria();
+      unsubSubmissions();
+    };
   }, []);
 
   // Save respondent draft
@@ -259,10 +268,6 @@ export default function App() {
 
   // Submit survey responses
   const handleSubmitSurvey = async () => {
-    if (!user) {
-      showToast('กรุณาเข้าสู่ระบบ Google ก่อนบันทึกข้อมูลส่วนกลาง');
-      return;
-    }
     if (!respondent.fullName.trim()) {
       showToast('กรุณากรอก "ชื่อ-นามสกุล" ของท่านก่อนส่งแบบสอบถาม');
       return;
@@ -290,21 +295,17 @@ export default function App() {
         createdAt: new Date().toISOString(),
       };
 
-      // สำรองในเครื่อง และบันทึกฐานข้อมูลหลักลง Firestore
+      // Save locally and to Cloud Firestore (cross-device persistence)
       saveSubmission(newSubmission);
-      await saveSubmissionToFirestore(newSubmission, user);
-      try {
-        const cloudSubmissions = await loadSubmissionsFromFirestore();
-        setSubmissions(cloudSubmissions);
-      } catch {
-        setSubmissions(loadSubmissions());
-      }
+      await saveSubmissionToCloud(newSubmission);
+      const updatedSubmissions = loadSubmissions();
+      setSubmissions(updatedSubmissions);
 
       let sheetUrl: string | undefined = undefined;
 
-      // สำเนาข้อมูลไป Google Sheet ผ่าน Google Apps Script (ถ้าตั้งค่าไว้)
+      // If user is connected to Google Sheets, sync immediately
       const token = await getAccessToken();
-      if (token) {
+      if (user) {
         try {
           const syncRes = await appendResponsesToSheet(token, newSubmission, diseases);
           if (syncRes.success) {
@@ -325,7 +326,7 @@ export default function App() {
       // Preserve responses so user answers do not disappear when submitted or refreshed!
       saveDraftFeedback(feedback);
       setLastSavedTime(`บันทึกและส่งข้อมูลสำเร็จ: ${new Date().toLocaleTimeString('th-TH')}`);
-      showToast('บันทึกข้อมูลลง Firestore เรียบร้อย และส่งสำเนาไป Google Sheet แล้ว');
+      showToast('บันทึกข้อมูลความคิดเห็นเรียบร้อยแล้ว (ข้อมูลถูกจัดเก็บถาวร)');
     } catch (err: any) {
       showToast(`เกิดข้อผิดพลาดในการบันทึก: ${err.message}`);
     } finally {
@@ -364,11 +365,9 @@ export default function App() {
           createdAt: new Date().toISOString(),
         };
         saveSubmission(activeSub);
-        if (user) {
-          await saveSubmissionToFirestore(activeSub, user);
-        }
+        await saveSubmissionToCloud(activeSub);
         targetSub = activeSub;
-        setSubmissions(user ? await loadSubmissionsFromFirestore() : loadSubmissions());
+        setSubmissions(loadSubmissions());
       }
 
       if (targetSub) {
@@ -447,23 +446,59 @@ export default function App() {
     }
   };
 
-  // Admin save changes
-  const handleSaveDiseases = (updated: DiseaseItem[]) => {
+  // Admin save changes (Cloud Firestore + Local)
+  const handleSaveDiseases = async (updated: DiseaseItem[]) => {
     setDiseases(updated);
-    saveDiseaseCriteria(updated);
-    if (user) {
-      saveDiseaseCriteriaToFirestore(updated, user).catch((error) => {
-        console.error('Firestore criteria save error:', error);
-        showToast('บันทึกในเครื่องแล้ว แต่ซิงก์เกณฑ์ขึ้น Firestore ไม่สำเร็จ');
-      });
+    setCloudSyncStatus('syncing');
+    const success = await saveCriteriaToCloud(updated);
+    if (success) {
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toLocaleTimeString('th-TH'));
+      showToast('☁️ บันทึกขึ้นคลาวด์แล้ว ทุกเครื่อง (PC/โน๊ตบุค) จะอัปเดตตรงกันทันที');
+    } else {
+      setCloudSyncStatus('local');
+      showToast('⚠️ บันทึกในเครื่องเรียบร้อย (เชื่อมต่อคลาวด์ไม่ได้ชั่วคราว)');
     }
   };
 
   // Admin reset
-  const handleResetDefault = () => {
-    const def = resetDiseaseCriteriaToDefault();
-    setDiseases(def);
-    if (user) saveDiseaseCriteriaToFirestore(def, user).catch(console.error);
+  const handleResetDefault = async () => {
+    setDiseases(INITIAL_DISEASE_ITEMS);
+    setCloudSyncStatus('syncing');
+    const success = await saveCriteriaToCloud(INITIAL_DISEASE_ITEMS);
+    if (success) {
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toLocaleTimeString('th-TH'));
+      showToast('คืนค่าเกณฑ์เริ่มต้นและอัปเดตขึ้นระบบคลาวด์เรียบร้อย');
+    }
+  };
+
+  // Manual cloud actions
+  const handleManualSyncToCloud = async () => {
+    setCloudSyncStatus('syncing');
+    const success = await saveCriteriaToCloud(diseases);
+    if (success) {
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toLocaleTimeString('th-TH'));
+      showToast(`☁️ บันทึกข้อมูลขึ้นคลาวด์สำเร็จ (${diseases.length} รายการ)`);
+    } else {
+      setCloudSyncStatus('local');
+      showToast('ไม่สามารถเชื่อมต่อคลาวด์ได้ในขณะนี้');
+    }
+  };
+
+  const handleForcePullFromCloud = async () => {
+    setCloudSyncStatus('syncing');
+    const items = await fetchCriteriaFromCloud();
+    if (items && items.length > 0) {
+      setDiseases(items);
+      setCloudSyncStatus('synced');
+      setLastCloudSyncTime(new Date().toLocaleTimeString('th-TH'));
+      showToast(`☁️ ดึงข้อมูลล่าสุดจากคลาวด์สำเร็จ (${items.length} รายการ)`);
+    } else {
+      setCloudSyncStatus('synced');
+      showToast('ข้อมูลบนเครื่องตรงกับคลาวด์แล้ว');
+    }
   };
 
   return (
@@ -485,6 +520,8 @@ export default function App() {
         onLogin={handleLogin}
         onLogout={handleLogout}
         activeSheetUrl={activeSheetUrl}
+        cloudSyncStatus={cloudSyncStatus}
+        lastCloudSyncTime={lastCloudSyncTime}
       />
 
       {/* Main Container */}
@@ -557,6 +594,10 @@ export default function App() {
             diseases={diseases}
             onSaveDiseases={handleSaveDiseases}
             onResetDefault={handleResetDefault}
+            cloudSyncStatus={cloudSyncStatus}
+            lastCloudSyncTime={lastCloudSyncTime}
+            onManualSyncToCloud={handleManualSyncToCloud}
+            onForcePullFromCloud={handleForcePullFromCloud}
           />
         )}
 

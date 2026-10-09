@@ -1,26 +1,20 @@
-# JIT Review - ODPC1 Chiang Mai
+<div align="center">
+<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
+</div>
 
-ระบบทบทวนเงื่อนไขการออกสอบสวนโรค JIT สคร.1 เชียงใหม่
+# Run and deploy your AI Studio app
 
-สถาปัตยกรรมเวอร์ชันนี้:
+This contains everything you need to run your app locally.
 
-- Vite + React
-- GitHub Pages
-- Firebase Authentication (Google Login)
-- Firestore เป็นฐานข้อมูลหลัก
-- Google Apps Script ส่งสำเนาไป Google Sheet โดยไม่ใช้ Sheets API/Drive API
+View your app in AI Studio: https://ai.studio/apps/dce9ceff-7676-4e3d-aacd-fcc520bd3a55
 
-ดูวิธีติดตั้งแบบทีละขั้นที่ `FREE_SETUP.md`
+## Run Locally
 
-## Development
+**Prerequisites:**  Node.js
 
-```bash
-npm install
-npm run dev
-```
 
-## Build
-
-```bash
-npm run build
-```
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`
