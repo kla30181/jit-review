@@ -356,7 +356,7 @@ export const CriteriaTable: React.FC<CriteriaTableProps> = ({
             <span>จัดเก็บข้อมูลอัตโนมัติแล้ว (Auto-saved) • ไม่สูญหายเมื่อโหลดหน้าใหม่หรือ Refresh</span>
           </div>
           <div className="text-[13px] text-slate-500 font-medium">
-            {lastSavedTime || 'ทุกการเลือกความคิดเห็นจะถูกบันทึกไว้ในระบบทันที และพร้อมส่งข้อมูลไปยัง Google Sheets'}
+            {lastSavedTime || 'ยังไม่บันทึก กรุณากดส่งคำตอบเพื่อบันทึกลงระบบ'}
           </div>
         </div>
 

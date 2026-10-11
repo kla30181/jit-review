@@ -46,6 +46,7 @@ export interface RespondentInfo {
 }
 
 export interface SubmissionRecord {
+  ownerUid?: string;
   id: string;
   respondent: RespondentInfo;
   responses: Record<string, LevelFeedback>; // key: `${diseaseId}_${levelId}`

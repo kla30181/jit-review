@@ -129,7 +129,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Google Sheets Sync status / sign-in */}
           {user ? (
             <div className="flex items-center gap-2 pl-2 border-l border-slate-700/60">
-              {activeSheetUrl && (
+              {isAdmin && activeSheetUrl && (
                 <a
                   href={activeSheetUrl}
                   target="_blank"
@@ -146,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
                   {user.displayName || user.email}
                 </div>
                 <div className="text-[12px] text-emerald-400 flex items-center justify-end gap-1 font-semibold">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> เชื่อม Sheets แล้ว
+                  <CheckCircle2 className="w-3.5 h-3.5" /> เข้าสู่ระบบแล้ว
                 </div>
               </div>
               <button

@@ -59,18 +59,26 @@ export const loadSubmissions = (): SubmissionRecord[] => {
   }
 };
 
-export const saveSubmission = (submission: SubmissionRecord): void => {
-  const current = loadSubmissions();
-  const updated = [submission, ...current];
-  localStorage.setItem(STORAGE_SUBMISSIONS_KEY, JSON.stringify(updated));
-};
-
-export const loadDraftFeedback = () => {
+export const saveSubmission = (
+  submission: SubmissionRecord
+): void => {
   try {
-    const raw = localStorage.getItem(STORAGE_CURRENT_FEEDBACK_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
+    const current = loadSubmissions();
+
+    const updated = [
+      submission,
+      ...current.filter((item) => item.id !== submission.id),
+    ];
+
+    localStorage.setItem(
+      STORAGE_SUBMISSIONS_KEY,
+      JSON.stringify(updated)
+    );
+  } catch (error) {
+    console.error(
+      "Failed to save submission locally:",
+      error
+    );
   }
 };
 

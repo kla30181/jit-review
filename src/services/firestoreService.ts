@@ -2,101 +2,158 @@ import {
   getFirestore,
   doc,
   getDoc,
+  updateDoc,
   setDoc,
   onSnapshot,
   collection,
-  getDocs,
   query,
   where,
   serverTimestamp,
   getDocFromServer,
-} from 'firebase/firestore';
-import { firebaseApp } from './firebaseClient';
-import { auth } from './firebaseAuth';
-import { DiseaseItem, SubmissionRecord, RespondentInfo, LevelFeedback } from '../types';
-import { INITIAL_DISEASE_ITEMS } from '../data/defaultCriteria';
+} from "firebase/firestore";
+import { firebaseApp } from "./firebaseClient";
+import { auth } from "./firebaseAuth";
+import {
+  DiseaseItem,
+  SubmissionRecord,
+  RespondentInfo,
+  LevelFeedback,
+} from "../types";
+import { INITIAL_DISEASE_ITEMS } from "../data/defaultCriteria";
 import {
   saveDiseaseCriteria as saveLocalCriteria,
   loadDiseaseCriteria as loadLocalCriteria,
-} from './storageService';
+} from "./storageService";
 
+// =====================================================
+// FIRESTORE CONFIG
+// =====================================================
 export const db = getFirestore(firebaseApp);
+const DATASET_DOC_ID = "jit_criteria";
+const criteriaDocRef = () =>
+  doc(db, "datasets", DATASET_DOC_ID);
 
-const DATASET_DOC_ID = 'jit_criteria';
-
-export const checkAdminPermission = async (uid: string): Promise<boolean> => {
+// =====================================================
+// ADMIN PERMISSION
+// =====================================================
+export const checkAdminPermission = async (
+  uid: string
+): Promise<boolean> => {
+  if (!auth.currentUser || auth.currentUser.uid !== uid) {
+    return false;
+  }
   try {
-    const snap = await getDoc(doc(db, 'admins', uid));
-    return snap.exists() && snap.data()?.active !== false;
+    const snapshot = await getDoc(
+      doc(db, "admins", uid)
+    );
+    return (
+      snapshot.exists() &&
+      snapshot.data()?.active === true
+    );
   } catch (error) {
-    console.warn('Cannot verify admin role:', error);
+    console.error(
+      "Cannot verify admin permission:",
+      error
+    );
     return false;
   }
 };
 
-/**
- * Validate Firestore connection
- */
-export const testFirestoreConnection = async (): Promise<boolean> => {
-  try {
-    const testDoc = await getDocFromServer(doc(db, 'datasets', 'connection_test'));
-    return true;
-  } catch (err) {
-    console.warn('Firestore connection check:', err);
-    return false;
-  }
-};
+// =====================================================
+// FIRESTORE CONNECTION TEST
+// =====================================================
+export const testFirestoreConnection =
+  async (): Promise<boolean> => {
+    if (!auth.currentUser) {
+      console.warn(
+        "Firestore connection check skipped: user not signed in"
+      );
+      return false;
+    }
+    try {
+      // Read only a document allowed by Firestore Rules.
+      // A missing document is not a connection failure.
+      await getDocFromServer(criteriaDocRef());
+      console.log("Firestore connection OK");
+      return true;
+    } catch (error) {
+      console.error(
+        "Firestore connection failed:",
+        error
+      );
+      return false;
+    }
+  };
 
-/**
- * Subscribe to real-time criteria updates from Firestore
- * Ensures PC and Notebook always stay in sync!
- */
+// =====================================================
+// CRITERIA SUBSCRIPTION
+// =====================================================
 export const subscribeToCriteria = (
-  onUpdate: (items: DiseaseItem[], source: 'cloud' | 'local') => void
+  onUpdate: (
+    items: DiseaseItem[],
+    source: "cloud" | "local"
+  ) => void
 ) => {
-  const criteriaDocRef = doc(db, 'datasets', DATASET_DOC_ID);
-
-  const unsubscribe = onSnapshot(
-    criteriaDocRef,
+  return onSnapshot(
+    criteriaDocRef(),
     (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        if (data && Array.isArray(data.items) && data.items.length > 0) {
-          // Update local cache as backup
+        if (
+          data &&
+          Array.isArray(data.items) &&
+          data.items.length > 0
+        ) {
           saveLocalCriteria(data.items);
-          onUpdate(data.items, 'cloud');
+          onUpdate(data.items, "cloud");
           return;
         }
       }
-      // If document doesn't exist in cloud yet, check local storage
       const local = loadLocalCriteria();
-      // If local has items (could be modified on this machine), seed cloud with local
       if (local && local.length > 0) {
-        onUpdate(local, 'local');
+        onUpdate(local, "local");
       } else {
-        onUpdate(INITIAL_DISEASE_ITEMS, 'local');
+        onUpdate(INITIAL_DISEASE_ITEMS, "local");
       }
     },
     (error) => {
-      console.error('Firestore criteria subscription error:', error);
-      // Fallback to local
+      console.error(
+        "Firestore criteria subscription error:",
+        error
+      );
       const local = loadLocalCriteria();
-      onUpdate(local, 'local');
+      onUpdate(
+        local && local.length > 0
+          ? local
+          : INITIAL_DISEASE_ITEMS,
+        "local"
+      );
     }
   );
-
-  return unsubscribe;
 };
 
-/**
- * Save disease criteria to Cloud Firestore and local storage
- */
-export const saveCriteriaToCloud = async (items: DiseaseItem[]): Promise<boolean> => {
-  if (!auth.currentUser || !(await checkAdminPermission(auth.currentUser.uid))) return false;
-
+// =====================================================
+// SAVE CRITERIA TO CLOUD
+// =====================================================
+export const saveCriteriaToCloud = async (
+  items: DiseaseItem[]
+): Promise<boolean> => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    console.error("Please sign in first");
+    return false;
+  }
+  const isAdmin = await checkAdminPermission(
+    currentUser.uid
+  );
+  if (!isAdmin) {
+    console.error(
+      "Permission denied: admin access required"
+    );
+    return false;
+  }
   try {
-    const criteriaDocRef = doc(db, 'datasets', DATASET_DOC_ID);
-    await setDoc(criteriaDocRef, {
+    await setDoc(criteriaDocRef(), {
       id: DATASET_DOC_ID,
       items,
       count: items.length,
@@ -104,115 +161,278 @@ export const saveCriteriaToCloud = async (items: DiseaseItem[]): Promise<boolean
       updatedTimestamp: serverTimestamp(),
     });
     saveLocalCriteria(items);
+    console.log(
+      "Criteria saved to Firestore successfully"
+    );
     return true;
-  } catch (err) {
-    console.error('Failed to save criteria to cloud:', err);
+  } catch (error) {
+    console.error(
+      "Failed to save criteria to cloud:",
+      error
+    );
     return false;
   }
 };
 
-/**
- * Force fetch latest criteria from Cloud
- */
-export const fetchCriteriaFromCloud = async (): Promise<DiseaseItem[] | null> => {
-  try {
-    const criteriaDocRef = doc(db, 'datasets', DATASET_DOC_ID);
-    const snap = await getDoc(criteriaDocRef);
-    if (snap.exists()) {
-      const data = snap.data();
-      if (data && Array.isArray(data.items) && data.items.length > 0) {
-        saveLocalCriteria(data.items);
-        return data.items;
-      }
+// =====================================================
+// FETCH CRITERIA
+// =====================================================
+export const fetchCriteriaFromCloud =
+  async (): Promise<DiseaseItem[] | null> => {
+    if (!auth.currentUser) {
+      return null;
     }
-    return null;
-  } catch (err) {
-    console.error('Failed to fetch criteria from cloud:', err);
-    return null;
-  }
-};
+    try {
+      const snapshot = await getDoc(
+        criteriaDocRef()
+      );
+      if (!snapshot.exists()) {
+        return null;
+      }
+      const data = snapshot.data();
+      if (
+        !data ||
+        !Array.isArray(data.items) ||
+        data.items.length === 0
+      ) {
+        return null;
+      }
+      saveLocalCriteria(data.items);
+      return data.items;
+    } catch (error) {
+      console.error(
+        "Failed to fetch criteria from cloud:",
+        error
+      );
+      return null;
+    }
+  };
 
-/**
- * Subscribe to submissions in real-time from Cloud
- */
+// =====================================================
+// SUBMISSIONS SUBSCRIPTION
+// =====================================================
 export const subscribeToSubmissions = (
   onUpdate: (submissions: SubmissionRecord[]) => void
 ) => {
-  if (!auth.currentUser) return () => {};
-  const subsColRef = query(collection(db, 'submissions'), where('ownerUid', '==', auth.currentUser.uid));
-
-  const unsubscribe = onSnapshot(
-    subsColRef,
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    onUpdate([]);
+    return () => {};
+  }
+  const submissionsQuery = query(
+    collection(db, "submissions"),
+    where("ownerUid", "==", currentUser.uid)
+  );
+  return onSnapshot(
+    submissionsQuery,
     (snapshot) => {
-      const cloudSubs: SubmissionRecord[] = [];
-      snapshot.forEach((doc) => {
-        const d = doc.data() as SubmissionRecord;
-        if (d && d.id) {
-          cloudSubs.push(d);
+      const cloudSubmissions: SubmissionRecord[] = [];
+      snapshot.forEach((documentSnapshot) => {
+        const data =
+          documentSnapshot.data() as SubmissionRecord;
+        if (data && data.id) {
+          cloudSubmissions.push(data);
         }
       });
-
-      // Sort by newest first
-      cloudSubs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-      onUpdate(cloudSubs);
+      cloudSubmissions.sort((a, b) => {
+        const dateA = new Date(
+          a.createdAt || 0
+        ).getTime();
+        const dateB = new Date(
+          b.createdAt || 0
+        ).getTime();
+        return dateB - dateA;
+      });
+      onUpdate(cloudSubmissions);
     },
-    (err) => {
-      console.error('Submissions subscription error:', err);
+    (error) => {
+      console.error(
+        "Submissions subscription error:",
+        error
+      );
       onUpdate([]);
     }
   );
-
-  return unsubscribe;
 };
 
-/**
- * Save a submission to Cloud Firestore and local storage
- */
-export const saveSubmissionToCloud = async (submission: SubmissionRecord): Promise<boolean> => {
-  if (!auth.currentUser) throw new Error("กรุณาเข้าสู่ระบบก่อนบันทึก Firestore");
+// =====================================================
+// SAVE SUBMISSION
+// =====================================================
+export const saveSubmissionToCloud = async (
+  submission: SubmissionRecord
+): Promise<boolean> => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new Error(
+      "กรุณาเข้าสู่ระบบก่อนบันทึก Firestore"
+    );
+  }
+  if (!submission.id) {
+    throw new Error(
+      "ไม่พบรหัสรายการแบบสอบถาม"
+    );
+  }
   try {
-    const subDocRef = doc(db, 'submissions', submission.id);
-    await setDoc(subDocRef, {
+    const submissionRef = doc(
+      db,
+      "submissions",
+      submission.id
+    );
+    await setDoc(submissionRef, {
       ...submission,
-      ownerUid: auth.currentUser.uid,
+      ownerUid: currentUser.uid,
       savedAt: serverTimestamp(),
     });
+    console.log(
+      "Submission saved to Firestore:",
+      submission.id
+    );
     return true;
-  } catch (err) {
-    console.error('Failed to save submission to cloud:', err);
-    throw err;
+  } catch (error) {
+    console.error(
+      "Failed to save submission to cloud:",
+      error
+    );
+    throw error;
   }
 };
 
+// =====================================================
+// DRAFT TYPES
+// =====================================================
 export interface CloudDraft {
   respondent: RespondentInfo;
   feedback: Record<string, LevelFeedback>;
 }
 
+// =====================================================
+// SUBSCRIBE TO USER DRAFT
+// =====================================================
 export const subscribeToDraft = (
   uid: string,
   onUpdate: (draft: CloudDraft | null) => void,
-  onError: (error: Error) => void,
-) => onSnapshot(doc(db, 'drafts', uid), snapshot => {
-  if (!snapshot.exists()) { onUpdate(null); return; }
-  const data = snapshot.data();
-  onUpdate({
-    respondent: data.respondent || { fullName: '', positionOrg: '' },
-    feedback: data.feedback || {},
-  });
-}, onError);
+  onError: (error: Error) => void
+) => {
+  if (auth.currentUser?.uid !== uid) {
+    onError(
+      new Error(
+        "ไม่มีสิทธิ์เข้าถึงแบบร่างของผู้ใช้อื่น"
+      )
+    );
+    return () => {};
+  }
+  return onSnapshot(
+    doc(db, "drafts", uid),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        onUpdate(null);
+        return;
+      }
+      const data = snapshot.data();
+      onUpdate({
+      respondent: data.respondent || {
+          fullName: "",
+          positionOrg: "",
+        },
+        feedback: data.feedback || {},
+      });
+    },
+    onError
+  );
+};
 
+// =====================================================
+// SAVE USER DRAFT
+// =====================================================
 export const saveDraftToCloud = async (
   uid: string,
   respondent: RespondentInfo,
-  feedback: Record<string, LevelFeedback>,
+  feedback: Record<string, LevelFeedback>
 ): Promise<void> => {
-  if (auth.currentUser?.uid !== uid) throw new Error('ไม่พบผู้ใช้ที่เข้าสู่ระบบ');
-  await setDoc(doc(db, 'drafts', uid), {
+  if (auth.currentUser?.uid !== uid) {
+    throw new Error(
+      "ไม่พบผู้ใช้ที่เข้าสู่ระบบ หรือไม่มีสิทธิ์บันทึกแบบร่าง"
+    );
+  }
+  await setDoc(doc(db, "drafts", uid), {
     ownerUid: uid,
     respondent,
     feedback,
+    updatedAt: serverTimestamp(),
+  });
+  console.log("Draft saved to Firestore");
+};
+/**
+ * Admin: subscribe to all submissions.
+ */
+export const subscribeToAllSubmissions = (
+  onUpdate: (submissions: SubmissionRecord[]) => void,
+  onError?: (error: Error) => void
+): (() => void) => {
+  const user = auth.currentUser;
+  if (!user) {
+    onError?.(new Error("กรุณาเข้าสู่ระบบ"));
+    return () => {};
+  }
+  let unsubscribe: (() => void) | undefined;
+  let cancelled = false;
+  void (async () => {
+    const allowed = await checkAdminPermission(user.uid);
+    if (cancelled) return;
+    if (!allowed) {
+      onError?.(new Error("ไม่มีสิทธิ์ผู้ดูแลระบบ"));
+      return;
+    }
+    unsubscribe = onSnapshot(
+      collection(db, "submissions"),
+      (snapshot) => {
+        if (cancelled) return;
+        const submissions = snapshot.docs.map((item) => {
+          const data = item.data() as SubmissionRecord;
+          return {
+            ...data,
+            id: data.id || item.id,
+          };
+        });
+        submissions.sort(
+          (a, b) =>
+            new Date(b.createdAt || 0).getTime() -
+            new Date(a.createdAt || 0).getTime()
+        );
+        onUpdate(submissions);
+      },
+      (error) => {
+        console.error("Admin submissions error:", error);
+        onError?.(error);
+      }
+    );
+  })().catch((error) => {
+    if (!cancelled) {
+      onError?.(
+        error instanceof Error ? error : new Error(String(error))
+      );
+    }
+  });
+  return () => {
+    cancelled = true;
+    unsubscribe?.();
+  };
+};
+
+// Edit a submitted response while preserving its owner and creation date.
+export const updateSubmissionToCloud = async (submission: SubmissionRecord): Promise<void> => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('กรุณาเข้าสู่ระบบ');
+  const reference = doc(db, 'submissions', submission.id);
+  const original = await getDoc(reference);
+  if (!original.exists()) throw new Error('ไม่พบคำตอบที่ต้องการแก้ไข');
+  const data = original.data();
+  if (data.ownerUid !== currentUser.uid && !(await checkAdminPermission(currentUser.uid))) {
+    throw new Error('ไม่มีสิทธิ์แก้ไขรายการนี้');
+  }
+  await updateDoc(reference, {
+    respondent: submission.respondent,
+    responses: submission.responses,
     updatedAt: serverTimestamp(),
   });
 };

@@ -31,8 +31,8 @@ import {
   saveSubmissionToCloud,
   testFirestoreConnection,
   checkAdminPermission,
-  subscribeToDraft,
-  saveDraftToCloud,
+  subscribeToAllSubmissions,
+  updateSubmissionToCloud,
 } from './services/firestoreService';
 import {
   initAuth,
@@ -71,13 +71,12 @@ export default function App() {
     sheetUrl?: string;
   } | null>(null);
   const [lastSavedTime, setLastSavedTime] = useState<string>('');
-  const [draftLoaded, setDraftLoaded] = useState(false);
-  const [draftError, setDraftError] = useState(false);
+  const [editingSubmissionId, setEditingSubmissionId] = useState<string | null>(null);
 
   // Auth & Google Sheets
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [activeSheetUrl, setActiveSheetUrl] = useState<string | null>(() => getConfiguredSheetUrl() || null);
+  const activeSheetUrl = isAdmin ? getConfiguredSheetUrl() : null;
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isSyncingSheets, setIsSyncingSheets] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -101,7 +100,7 @@ export default function App() {
         setUser(null);
         setIsAdmin(false);
         setActiveTab('survey');
-        setDraftLoaded(false);
+        setEditingSubmissionId(null);
         setRespondent({ fullName: '', positionOrg: '', email: '' });
         setFeedback({});
         setSubmissions([]);
@@ -122,48 +121,31 @@ export default function App() {
       setLastCloudSyncTime(new Date().toLocaleTimeString('th-TH'));
     });
 
-    // Subscribe to submissions in real time
-    const unsubSubmissions = subscribeToSubmissions((subs) => {
-      setSubmissions(subs);
-    });
-
-    setDraftLoaded(false);
-    const unsubDraft = subscribeToDraft(user.uid, (draft) => {
-      const remoteRespondent = draft?.respondent || { fullName: '', positionOrg: '', email: user.email || '' };
-      const remoteFeedback = draft?.feedback || {};
-      setRespondent(prev => JSON.stringify(prev) === JSON.stringify(remoteRespondent) ? prev : remoteRespondent);
-      setFeedback(prev => JSON.stringify(prev) === JSON.stringify(remoteFeedback) ? prev : remoteFeedback);
-      setDraftLoaded(true);
-      setDraftError(false);
-    }, (error) => {
-      console.error('Draft subscription error:', error);
-      setDraftError(true);
-      setDraftLoaded(false);
-    });
-
-    return () => {
-      unsubCriteria();
-      unsubSubmissions();
-      unsubDraft();
-    };
+    return () => { unsubCriteria(); };
   }, [user]);
 
-  // Debounced Firestore autosave: only after the current user's cloud draft has loaded.
-  // All edits remain in React state until the server acknowledges them.
+  // Admin sees all submissions; other users see only their own.
   useEffect(() => {
-    if (!user || !draftLoaded || draftError) return;
-    setLastSavedTime('กำลังบันทึกแบบร่างออนไลน์...');
-    const timer = window.setTimeout(async () => {
-      try {
-        await saveDraftToCloud(user.uid, respondent, feedback);
-        setLastSavedTime(`บันทึกแบบร่างออนไลน์แล้ว: ${new Date().toLocaleTimeString('th-TH')}`);
-      } catch (error) {
-        console.error('Autosave failed:', error);
-        setLastSavedTime('บันทึกแบบร่างออนไลน์ไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ');
-      }
-    }, 1000);
-    return () => window.clearTimeout(timer);
-  }, [user, draftLoaded, draftError, respondent, feedback]);
+    if (!user) { setSubmissions([]); return; }
+    setSubmissions([]);
+    const unsubscribe = isAdmin
+      ? subscribeToAllSubmissions(setSubmissions, console.error)
+      : subscribeToSubmissions(setSubmissions);
+    return () => unsubscribe();
+  }, [user?.uid, isAdmin]);
+
+  const handleEditSubmission = (submission: SubmissionRecord) => {
+    if (!user || (!isAdmin && submission.ownerUid !== user.uid)) {
+      showToast('ไม่มีสิทธิ์แก้ไขรายการนี้');
+      return;
+    }
+    setEditingSubmissionId(submission.id);
+    setRespondent({ ...submission.respondent });
+    setFeedback({ ...submission.responses });
+    setActiveTab('survey');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showToast('กำลังแก้ไขคำตอบที่บันทึกไว้ กดบันทึกเพื่อยืนยันการเปลี่ยนแปลง');
+  };
 
   const handleRespondentChange = (field: keyof RespondentInfo, value: string) => {
     setRespondent(previous => ({ ...previous, [field]: value }));
@@ -183,9 +165,9 @@ export default function App() {
   };
 
   const handleClearResponses = () => {
-    if (!user || !draftLoaded) { showToast('กรุณาเข้าสู่ระบบและรอโหลดแบบร่างก่อน'); return; }
+    if (!user) { showToast('กรุณาเข้าสู่ระบบ'); return; }
     setFeedback({});
-    showToast('ล้างคำตอบแล้ว ระบบจะบันทึกแบบร่างใหม่ลง Firestore');
+    showToast('ล้างคำตอบบนหน้าจอแล้ว (ยังไม่ได้บันทึก)');
   };
 
   // Calculate changed diseases count per group and overall
@@ -292,24 +274,28 @@ export default function App() {
       return;
     }
 
-    if (!user || !draftLoaded || draftError) { showToast('กรุณาเข้าสู่ระบบและรอโหลดแบบร่างออนไลน์ก่อนส่ง'); return; }
+    if (!user) { showToast('กรุณาเข้าสู่ระบบก่อนบันทึก'); return; }
     setIsSubmitting(true);
 
     try {
       const newSubmission: SubmissionRecord = {
-        id: `sub-${crypto.randomUUID()}`,
+        id: editingSubmissionId || `sub-${crypto.randomUUID()}`,
         respondent: {
           fullName: respondent.fullName.trim(),
           positionOrg: respondent.positionOrg.trim(),
           email: user?.email || undefined,
         },
         responses: { ...feedback },
-        createdAt: new Date().toISOString(),
+        createdAt: editingSubmissionId ? (submissions.find(s => s.id === editingSubmissionId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
       };
 
       // Confirm server persistence; do not report success on failure.
-      await saveSubmissionToCloud(newSubmission);
-      await saveDraftToCloud(user.uid, respondent, feedback);
+      if (editingSubmissionId) {
+        await updateSubmissionToCloud(newSubmission);
+      } else {
+        await saveSubmissionToCloud(newSubmission);
+      }
+      setEditingSubmissionId(null);
 
       let sheetUrl: string | undefined = undefined;
 
@@ -320,7 +306,7 @@ export default function App() {
           const syncRes = await appendResponsesToSheet(token, newSubmission, diseases);
           if (syncRes.success) {
             sheetUrl = syncRes.spreadsheetUrl;
-            setActiveSheetUrl(sheetUrl);
+            // Sheet link is only available to administrators.
           }
         } catch (syncErr: any) {
           console.error('Google Sheets sync error:', syncErr);
@@ -333,7 +319,7 @@ export default function App() {
         sheetUrl,
       });
 
-      // Preserve responses so user answers do not disappear when submitted or refreshed!
+      // No autosave; only explicitly submitted responses are stored.
 
       setLastSavedTime(`บันทึก Firestore สำเร็จ: ${new Date().toLocaleTimeString('th-TH')}`);
       showToast('บันทึกลง Firestore สำเร็จ (Google Sheets ต้องตรวจสอบผลซิงก์แยกต่างหาก)');
@@ -346,6 +332,7 @@ export default function App() {
 
   // Open the configured spreadsheet; do not create spreadsheets in the browser.
   const handleConnectAndOpenSheet = async (_subId?: string) => {
+    if (!isAdmin) { showToast('เฉพาะผู้ดูแลระบบเท่านั้น'); return; }
     const url = getConfiguredSheetUrl();
     if (!url) { showToast('กรุณาตั้งค่า VITE_GOOGLE_SHEET_URL'); return; }
     window.open(url, '_blank', 'noopener,noreferrer');
@@ -353,7 +340,7 @@ export default function App() {
 
   // Re-dispatch records to Apps Script. Because of no-cors, delivery remains unverified.
   const handleSyncGoogleSheets = async () => {
-    if (!user) { showToast('กรุณาเข้าสู่ระบบ Firebase'); return; }
+    if (!user || !isAdmin) { showToast('เฉพาะผู้ดูแลระบบเท่านั้น'); return; }
     if (!submissions.length) { showToast('ยังไม่มีข้อมูลที่บันทึกในระบบ'); return; }
     setIsSyncingSheets(true);
     try {
@@ -447,19 +434,14 @@ export default function App() {
         lastCloudSyncTime={lastCloudSyncTime}
       />
 
-      {user && !draftLoaded && (
-        <div role="status" className="mx-auto max-w-[1700px] w-full px-4 py-2 bg-amber-50 text-amber-900 text-sm border-b border-amber-200">
-          {draftError ? 'ไม่สามารถโหลดแบบร่างออนไลน์ได้ โปรดตรวจสอบสิทธิ์ Firestore แล้วรีเฟรชหน้า' : 'กำลังโหลดคำตอบและข้อมูลผู้ตอบจาก Firestore...'}
-        </div>
-      )}
       {!user && (
         <div className="mx-auto max-w-[1700px] w-full px-4 py-2 bg-amber-50 text-amber-900 text-sm border-b border-amber-200">
-          กรุณาเข้าสู่ระบบ Google เพื่อบันทึกคำตอบและแบบร่างออนไลน์
+          กรุณาเข้าสู่ระบบ Google เพื่อบันทึกและดูคำตอบของตนเอง (ไม่มีการบันทึกแบบร่าง)
         </div>
       )}
       {/* Main Container */}
       <main className="flex-1 max-w-[1700px] w-full mx-auto px-2.5 sm:px-4 lg:px-6 py-4">
-        {activeTab === 'survey' && user && draftLoaded && (
+        {activeTab === 'survey' && user && (
           <div>
             {/* Respondent Info Card with Progress Bar and Auto-Save Status */}
             <RespondentInfoCard
@@ -470,12 +452,12 @@ export default function App() {
               isFilteringChanged={onlyChanged}
               filterContextLabel={filterContextLabel}
               lastSavedTime={lastSavedTime}
-              onConnectAndOpenSheet={() => handleConnectAndOpenSheet()}
+              onConnectAndOpenSheet={isAdmin ? () => handleConnectAndOpenSheet() : undefined}
               activeSheetUrl={activeSheetUrl}
             />
 
             {/* Active Google Sheet banner if available */}
-            {activeSheetUrl && (
+            {isAdmin && activeSheetUrl && (
               <div className="mb-4 px-4 py-2.5 bg-emerald-50 rounded-xl border border-emerald-200 flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-900">
                 <div className="flex items-center gap-2">
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -514,7 +496,7 @@ export default function App() {
               onOpenSATModal={(d) => setSatModalDisease(d)}
               onSubmit={handleSubmitSurvey}
               isSubmitting={isSubmitting}
-              onConnectAndOpenSheet={() => handleConnectAndOpenSheet()}
+              onConnectAndOpenSheet={isAdmin ? () => handleConnectAndOpenSheet() : undefined}
               activeSheetUrl={activeSheetUrl}
               lastSavedTime={lastSavedTime}
               onClearResponses={handleClearResponses}
@@ -544,6 +526,9 @@ export default function App() {
             submissions={submissions}
             user={user}
             onSyncGoogleSheets={handleSyncGoogleSheets}
+            isAdmin={isAdmin}
+            currentUid={user?.uid}
+            onEditSubmission={handleEditSubmission}
             activeSheetUrl={activeSheetUrl}
             isSyncingSheets={isSyncingSheets}
           />
@@ -581,7 +566,7 @@ export default function App() {
               <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-left text-xs text-emerald-900">
                 <div className="font-semibold flex items-center gap-1.5 mb-1 text-emerald-800">
                   <FileSpreadsheet className="w-4 h-4" />
-                  บันทึกลง Google Sheets เรียบร้อยแล้ว
+                  ส่งคำขอซิงก์ Google Sheets แล้ว (รอตรวจสอบผล)
                 </div>
                 <a
                   href={successModalData.sheetUrl}
@@ -595,8 +580,7 @@ export default function App() {
             ) : (
               <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-left text-xs text-blue-900">
                 <span>
-                  ข้อมูลถูกบันทึกในระบบเรียบร้อย หากต้องการส่งข้อมูลต่อไปยัง Google Sheets
-                  สามารถกดเชื่อมต่อที่เมนูด้านบนได้ตลอดเวลา
+                  ข้อมูลถูกบันทึกใน Firestore เรียบร้อยแล้ว สามารถดูหรือแก้ไขคำตอบได้ที่หน้าสรุปผล
                 </span>
               </div>
             )}

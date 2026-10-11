@@ -24,6 +24,9 @@ interface SummaryViewProps {
   onSyncGoogleSheets: () => void;
   activeSheetUrl?: string | null;
   isSyncingSheets?: boolean;
+  isAdmin: boolean;
+  currentUid?: string;
+  onEditSubmission: (submission: SubmissionRecord) => void;
 }
 
 export const SummaryView: React.FC<SummaryViewProps> = ({
@@ -33,6 +36,9 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
   onSyncGoogleSheets,
   activeSheetUrl,
   isSyncingSheets = false,
+  isAdmin,
+  currentUid,
+  onEditSubmission,
 }) => {
   const [selectedSubTab, setSelectedSubTab] = useState<'overview' | 'submissions' | 'suggestions'>('overview');
 
@@ -116,19 +122,19 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
               <span>ดาวน์โหลดข้อมูลความคิดเห็น (CSV)</span>
             </button>
 
-            <button
+            {isAdmin && <button
               onClick={onSyncGoogleSheets}
               disabled={isSyncingSheets}
               className="flex items-center gap-1.5 px-3.5 py-2 bg-[#122344] hover:bg-[#1a3465] text-white rounded-xl text-xs font-bold transition-all shadow-xs disabled:opacity-50"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
               <span>{isSyncingSheets ? 'กำลังบันทึกลงชีต...' : 'บันทึกลง Google Sheets'}</span>
-            </button>
+            </button>}
           </div>
         </div>
 
         {/* Connected Google Sheets Link if exists */}
-        {activeSheetUrl && (
+        {isAdmin && activeSheetUrl && (
           <div className="mt-4 p-3 bg-emerald-50 rounded-xl border border-emerald-200 flex items-center justify-between text-xs text-emerald-900">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -403,6 +409,13 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
                       </div>
                     </div>
 
+                    <div className="flex items-center gap-3">
+                      {(isAdmin || sub.ownerUid === currentUid) && (
+                        <button type="button" onClick={() => onEditSubmission(sub)}
+                          className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">
+                          ดู / แก้ไขคำตอบ
+                        </button>
+                      )}
                     <div className="text-right sm:text-right">
                       <div className="text-slate-600 font-medium">
                         ตอบแล้ว {Object.keys(sub.responses).length} ข้อ
@@ -410,6 +423,7 @@ export const SummaryView: React.FC<SummaryViewProps> = ({
                       <div className="text-[11px] text-slate-400">
                         {new Date(sub.createdAt).toLocaleString('th-TH')}
                       </div>
+                    </div>
                     </div>
                   </div>
                 ))
